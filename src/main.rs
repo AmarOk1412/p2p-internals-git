@@ -18,13 +18,10 @@ fn main() {
     unsafe {
         wolftransport::register(Arc::new(Mutex::new(transport_channel)));
     }
-    
-    // TODO
 
     let server = thread::spawn(move || {
-        let value = server_channel.recv().expect("Unable to receive from channel");
-        println!("{:?}", value);
-        let server = Server::new("TODO FROM");
+        let server = Server::new(Arc::new(Mutex::new(server_channel)), "TODO FROM");
+        server.read();
     });
 
     let dest = TempDir::new().unwrap();

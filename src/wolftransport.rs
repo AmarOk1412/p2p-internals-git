@@ -1,15 +1,15 @@
 // https://docs.rs/git2/0.13.17/git2/transport/fn.register.html
 
+use bichannel::Channel;
 use git2::Error;
 use git2::transport::SmartSubtransportStream;
 use git2::transport::{Service, SmartSubtransport, Transport};
 
 use std::io;
 use std::io::prelude::*;
-
-use bichannel::Channel;
-
 use std::sync::{Arc, Mutex};
+
+static HOST_TAG: &str = "host=";
 
 struct WolfTransport {
     channel: Arc<Mutex<Channel<Vec<u8>, Vec<u8>>>>,
@@ -57,13 +57,39 @@ impl SmartSubtransport for WolfTransport {
     }
 }
 
+impl WolfTransport {
+    fn generateRequest(cmd: &str, url: &str) -> Vec<u8> {
+        // url format = host/repo
+        // Note: don't care about exception as it's just for a tuto
+        let sep = url.find('/').unwrap();
+        let host = url.get(0..sep).unwrap();
+        let repo = url.get(sep+1..).unwrap();
+
+        let null_char = '\0';
+        let total = 4                                   /* 4 bytes for the len len */
+                    + cmd.len()                         /* followed by the command */
+                    + 1                                 /* space */
+                    + repo.len()                        /* repo to clone */
+                    + 1                                 /* \0 */
+                    + HOST_TAG.len() + host.len()       /* host=server */
+                    + 1                                 /* \0 */;
+        let request = format!("{:04x}{} {}{}{}{}{}", total, cmd, repo, null_char, HOST_TAG, host, null_char);
+        request.as_bytes().to_vec()
+    }
+}
+
 impl Read for WolfSubTransport {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         println!("READ");
         if !self.sent_request {
-            // TODO
-            let command = "upload-pack-ls TODO".as_bytes().to_vec();
-            self.channel.lock().unwrap().send(command);
+            let cmd = match self.action {
+                Service::UploadPackLs => "upload-pack-ls",
+                Service::UploadPack => "upload-pack",
+                Service::ReceivePackLs => "receive-pack-ls",
+                Service::ReceivePack => "receive-pack",
+            };
+            let cmd = WolfTransport::generateRequest(cmd, &*self.url);
+            self.channel.lock().unwrap().send(cmd);
             self.sent_request = true;
         }
         Ok(self.channel.lock().unwrap().recv().unwrap_or(Vec::new()).len())
