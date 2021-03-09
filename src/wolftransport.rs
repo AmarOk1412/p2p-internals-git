@@ -59,11 +59,11 @@ impl SmartSubtransport for WolfTransport {
 
 impl WolfTransport {
     fn generateRequest(cmd: &str, url: &str) -> Vec<u8> {
-        // url format = host/repo
+        // url format = wolf://host/repo
         // Note: don't care about exception as it's just for a tuto
-        let sep = url.find('/').unwrap();
-        let host = url.get(0..sep).unwrap();
-        let repo = url.get(sep+1..).unwrap();
+        let sep = url.rfind('/').unwrap();
+        let host = url.get(7..sep).unwrap();
+        let repo = url.get(sep..).unwrap();
 
         let null_char = '\0';
         let total = 4                                   /* 4 bytes for the len len */
@@ -83,16 +83,23 @@ impl Read for WolfSubTransport {
         println!("READ");
         if !self.sent_request {
             let cmd = match self.action {
-                Service::UploadPackLs => "upload-pack-ls",
-                Service::UploadPack => "upload-pack",
-                Service::ReceivePackLs => "receive-pack-ls",
-                Service::ReceivePack => "receive-pack",
+                Service::UploadPackLs => "git-upload-pack",
+                Service::UploadPack => "git-upload-pack",
+                Service::ReceivePackLs => "git-receive-pack",
+                Service::ReceivePack => "git-receive-pack",
             };
             let cmd = WolfTransport::generateRequest(cmd, &*self.url);
             self.channel.lock().unwrap().send(cmd);
             self.sent_request = true;
         }
-        Ok(self.channel.lock().unwrap().recv().unwrap_or(Vec::new()).len())
+        let mut recv = self.channel.lock().unwrap().recv().unwrap_or(Vec::new());
+        let mut iter = recv.drain(..);
+        let mut idx = 0;
+        while let Some(v) = iter.next() {
+            buf[idx] = v;
+            idx += 1;
+        }
+        Ok(idx)
     }
 }
 

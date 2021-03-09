@@ -7,6 +7,9 @@ use tempfile::TempDir; // TODO remove
 use std::thread;
 use std::sync::{Arc, Mutex};
 
+use git2::build::{CheckoutBuilder, RepoBuilder};
+use git2::{FetchOptions, Progress, RemoteCallbacks};
+
 fn main() {
     // Usage: ./p2p-internal-git --repo FROM_DIR --dest DEST_DIR
 
@@ -20,11 +23,20 @@ fn main() {
     }
 
     let server = thread::spawn(move || {
-        let server = Server::new(Arc::new(Mutex::new(server_channel)), "TODO FROM");
+        let mut server = Server::new(Arc::new(Mutex::new(server_channel)), "TODO FROM");
         server.read();
     });
 
     let dest = TempDir::new().unwrap();
-    let r = git2::Repository::clone("wolf://zds", dest.path()).unwrap();
+
+
+
+    let mut co = CheckoutBuilder::new();
+    let mut fo = FetchOptions::new();
+    RepoBuilder::new()
+        .fetch_options(fo)
+        .with_checkout(co)
+        .clone("wolf://localhost/zds", dest.path()).unwrap();
+
     server.join().expect("The sender thread has panicked");
 }
