@@ -29,13 +29,7 @@ fn main() {
 
     let dest = TempDir::new().unwrap();
 
-
-
-    let mut co = CheckoutBuilder::new();
-    let mut fo = FetchOptions::new();
     RepoBuilder::new()
-        .fetch_options(fo)
-        .with_checkout(co)
         .clone("wolf://localhost/zds", dest.path()).unwrap();
 
     server.join().expect("The sender thread has panicked");

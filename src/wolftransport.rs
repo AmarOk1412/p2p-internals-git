@@ -30,7 +30,7 @@ pub unsafe fn register(channel: Arc<Mutex<Channel<Vec<u8>, Vec<u8>>>>) {
 fn factory(remote: &git2::Remote<'_>, channel: Arc<Mutex<Channel<Vec<u8>, Vec<u8>>>>) -> Result<Transport, Error> {
     Transport::smart(
         remote,
-        true,
+        false,
         WolfTransport {
             channel
         },
