@@ -9,7 +9,7 @@ use std::sync::{ Arc, Mutex };
 
 static FLUSH_PKT: &str = "0000";
 static NAK_PKT: &str = "0008NAK\n";
-static DONE_PKT: &str = "0009NAK\n";
+static DONE_PKT: &str = "0009done\n";
 static WANT_CMD: &str = "want";
 static HAVE_CMD: &str = "have";
 static UPLOAD_PACK_CMD: &str = "git-upload-pack";
@@ -120,7 +120,7 @@ impl Server {
         self.buf.len() != 0
     }
 
-    fn send_references_capabilities(&self,) {
+    fn send_references_capabilities(&self) {
         let current_head = self.repository.refname_to_id("HEAD").unwrap();
         let mut capabilities = format!("{} HEAD\0side-band side-band-64k shallow no-progress include-tag", current_head);
         capabilities = format!("{:04x}{}\n", capabilities.len() + 5 /* size + \n */, capabilities);
@@ -176,25 +176,30 @@ impl Server {
             }
             pb.insert_commit(oid);
             let commit = self.repository.find_commit(oid).unwrap();
+            let mut commit_parents = commit.parents();
             // Make sure to explore the whole graph
-            while let Some(p) = commit.parents().next() {
+            while let Some(p) = commit_parents.next() {
                 parents.push(p.id().to_string());
             }
         }
 
         let mut data = Buf::new();
         pb.write_buf(&mut data);
+        println!("{:?}", data.len());
 
-        let mut sent = 0;
-        let mut buf = data.as_str().unwrap();
         let len = data.len();
+        let data : Vec<u8> = data.to_vec();
+        let mut sent = 0;
         while sent < len {
             // cf https://github.com/git/git/blob/master/Documentation/technical/pack-protocol.txt#L166
             // In 'side-band-64k' mode it will send up to 65519 data bytes plus 1 control code, for a
             // total of up to 65520 bytes in a pkt-line.
             let pkt_size = min(65519, len - sent);
-            let pkt = format!("{:04x}{:?}{}", pkt_size, b"\x01", &buf[sent..(sent+pkt_size)]);
+            // The packet is Size (4 bytes), Control byte (0x01 for data), pack data.
+            let pkt = format!("{:04x}", pkt_size + 5 /* size + control */);
             self.channel.lock().unwrap().send(pkt.as_bytes().to_vec()).unwrap();
+            self.channel.lock().unwrap().send(b"\x01".to_vec()).unwrap();
+            self.channel.lock().unwrap().send(data[sent..(sent+pkt_size)].to_vec()).unwrap();
             sent += pkt_size;
         }
 

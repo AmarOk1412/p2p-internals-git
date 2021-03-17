@@ -8,5 +8,6 @@ edition = "2018"
 
 [dependencies]
 bichannel = "0.0.4"
-git2="0.13.17"
+#git2="0.13.17"
+git2 = { path = "../git2-rs", version = "0.13.17", default-features = false }
 tempfile = "3"

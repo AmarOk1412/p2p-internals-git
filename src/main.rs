@@ -31,6 +31,7 @@ fn main() {
 
     RepoBuilder::new()
         .clone("wolf://localhost/zds", dest.path()).unwrap();
+    println!("Cloned into {:?}!", dest.path());
 
     server.join().expect("The sender thread has panicked");
 }

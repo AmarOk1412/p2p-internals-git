@@ -105,12 +105,8 @@ impl Read for WolfSubTransport {
 
 impl Write for WolfSubTransport {
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        println!("WRITE");
-        if !self.sent_request {
-            self.channel.lock().unwrap().send(data.to_vec());
-            self.sent_request = true;
-            // TODO
-        }
+        println!("WRITE {}", data.len());
+        self.channel.lock().unwrap().send(data.to_vec());
         Ok(data.len())
     }
     fn flush(&mut self) -> io::Result<()> {
