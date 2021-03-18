@@ -2,36 +2,54 @@ mod wolftransport;
 mod server;
 
 use bichannel::channel;
+use wolftransport::WolfChannel;
+use git2::build::RepoBuilder;
 use server::Server;
-use tempfile::TempDir; // TODO remove
-use std::thread;
+use std::env;
 use std::sync::{Arc, Mutex};
-
-use git2::build::{CheckoutBuilder, RepoBuilder};
-use git2::{FetchOptions, Progress, RemoteCallbacks};
+use std::thread;
+use std::path::Path;
 
 fn main() {
-    // Usage: ./p2p-internal-git --repo FROM_DIR --dest DEST_DIR
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 3 {
+        println!("Usage: ./p2p-internal-git <src_dir> <dest_dir>");
+        return;
+    }
+    
+    let src_dir = args[1].clone();
+    let dest_dir = Path::new(&args[2]);
+
+    if dest_dir.is_dir() {
+        println!("Can't clone into an existing directory");
+        return;
+    }
 
     // Note: here we use a mpsc::channel for demo purposes, but
     // the transport can be on top of anything you want/need.
     // It can be replaced by a real server with TLS support for
     // example.
     let (server_channel, transport_channel) = channel();
+    let transport_channel = Arc::new(Mutex::new(WolfChannel {
+        channel: transport_channel
+    }));
+    let server_channel = Arc::new(Mutex::new(WolfChannel {
+        channel: server_channel
+    }));
     unsafe {
-        wolftransport::register(Arc::new(Mutex::new(transport_channel)));
+        wolftransport::register(transport_channel);
     }
 
     let server = thread::spawn(move || {
-        let mut server = Server::new(Arc::new(Mutex::new(server_channel)), "TODO FROM");
-        server.read();
+        println!("Starting server for {}", src_dir);
+        let mut server = Server::new(server_channel, &*src_dir);
+        server.run();
     });
 
-    let dest = TempDir::new().unwrap();
+    // Note: "wolf://" triggers our registered transport. localhost/zds is unused
+    // as our server only serves one repository and the address is not resolved.
+    RepoBuilder::new().clone("wolf://localhost/zds", dest_dir).unwrap();
+    println!("Cloned into {:?}!", dest_dir);
 
-    RepoBuilder::new()
-        .clone("wolf://localhost/zds", dest.path()).unwrap();
-    println!("Cloned into {:?}!", dest.path());
-
-    server.join().expect("The sender thread has panicked");
+    server.join().expect("The server panicked");
 }

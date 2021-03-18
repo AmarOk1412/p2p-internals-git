@@ -1,11 +1,8 @@
-
-use bichannel::Channel;
+use crate::wolftransport::Channel;
 use git2::{ Buf, Oid, Repository, Sort };
-use std::collections::HashMap;
 use std::cmp::{ max, min };
 use std::i64;
 use std::str;
-use std::sync::{ Arc, Mutex };
 
 static FLUSH_PKT: &str = "0000";
 static NAK_PKT: &str = "0008NAK\n";
@@ -14,33 +11,43 @@ static WANT_CMD: &str = "want";
 static HAVE_CMD: &str = "have";
 static UPLOAD_PACK_CMD: &str = "git-upload-pack";
 
+/**
+ * Represents a git server working a our custom transport, serving a given repository
+ */
 pub struct Server {
-    path: String,
     repository: Repository,
-    channel: Arc<Mutex<Channel<Vec<u8>, Vec<u8>>>>,
-    // socket: Socket, // TODO channel? tcp socket? other?
+    channel: Channel,
     wanted: String,
     common: String,
     have: Vec<String>,
     buf: Vec<u8>,
+    stop: bool,
 }
 
 impl Server {
-    pub fn new(channel: Arc<Mutex<Channel<Vec<u8>, Vec<u8>>>>, path: &str) -> Self {
-        let repository = Repository::open("/home/amarok/Projects/tmp").unwrap();
+    /**
+     * Creates a new Server for a given path and transport
+     * @param channel       Our custom transport
+     * @param path          Repository
+     * @return the server
+     */
+    pub fn new(channel: Channel, path: &str) -> Self {
+        let repository = Repository::open(path).unwrap();
         Self {
-            path: path.to_string(),
             repository,
             channel,
             wanted: String::new(),
             common: String::new(),
             have: Vec::new(),
             buf: Vec::new(),
+            stop: false,
         }
     }
 
-    pub fn read(&mut self) {
-        loop {
+    pub fn run(&mut self) {
+        // stop is set to true when the clone finished.
+        // until then, answer to the client.
+        while !self.stop {
             let buf = self.channel.lock().unwrap().recv().unwrap();
             self.recv(buf);
         }
@@ -49,12 +56,14 @@ impl Server {
     fn recv(&mut self, buf: Vec<u8>) {
         let mut buf = Some(buf);
         let mut need_more_parsing = true;
+        // Then client can send multiple pkt-lines in one buffer,
+        // so, parse until ready to receive new orders.
         while need_more_parsing {
             need_more_parsing = self.parse(buf.take());
         }
     }
 
-    fn parse(&mut self, mut buf: Option<Vec<u8>>) -> bool {
+    fn parse(&mut self, buf: Option<Vec<u8>>) -> bool {
         // Parse pkt len
         // Reference: https://github.com/git/git/blob/master/Documentation/technical/protocol-common.txt#L51
         // The first four bytes define the length of the packet and 0000 is a FLUSH pkt
@@ -65,7 +74,7 @@ impl Server {
         let pkt_len = max(4 as usize, i64::from_str_radix(pkt_len, 16).unwrap() as usize);
         let pkt : Vec<u8> = self.buf.drain(0..pkt_len).collect();
         let pkt = str::from_utf8(&pkt[0..pkt_len]).unwrap();
-        println!("received pkt {}", pkt);
+        println!("RECV: {}", pkt);
 
         if pkt.find(UPLOAD_PACK_CMD) == Some(4) {
             // Cf: https://github.com/git/git/blob/master/Documentation/technical/pack-protocol.txt#L166
@@ -90,6 +99,7 @@ impl Server {
             if self.common.is_empty() {
                 if self.repository.find_commit(Oid::from_str(&*have_commit).unwrap()).is_ok() {
                     self.common = have_commit.clone();
+                    println!("Set common commit to: {}", self.common);
                 }
             }
             self.have.push(have_commit);
@@ -106,6 +116,7 @@ impl Server {
             if send_data {
                 self.send_pack_data();
             }
+            self.stop = true;
         } else if pkt == FLUSH_PKT {
             if !self.have.is_empty() {
                 // Reference:
@@ -131,34 +142,42 @@ impl Server {
             capabilities += &*format!("{:04x}{} {}\n", 6 /* size + space + \n */ + 40 /* oid */ + reference.len(), oid, reference);
         }
 
-        print!("{}", capabilities);
+        print!("Send: {}", capabilities);
         self.channel.lock().unwrap().send(capabilities.as_bytes().to_vec()).unwrap();
-        println!("{}", FLUSH_PKT);
+        println!("Send: {}", FLUSH_PKT);
         self.channel.lock().unwrap().send(FLUSH_PKT.as_bytes().to_vec()).unwrap();
     }
 
     fn nak(&self) -> bool {
+        print!("Send: {}", NAK_PKT);
         self.channel.lock().unwrap().send(NAK_PKT.as_bytes().to_vec()).is_ok()
     }
 
     fn ack_common(&self) -> bool {
         let length = 18 /* size + ACK + space * 2 + continue + \n */ + self.common.len();
         let msg = format!("{:04x}ACK {} continue\n", length, self.common);
+        print!("Send: {}", msg);
         self.channel.lock().unwrap().send(msg.as_bytes().to_vec()).is_ok()
     }
 
     fn ack_first(&self) -> bool {
         let length = 9 /* size + ACK + space + \n */ + self.common.len();
         let msg = format!("{:04x}ACK {}\n", length, self.common);
+        print!("Send: {}", msg);
         self.channel.lock().unwrap().send(msg.as_bytes().to_vec()).is_ok()
     }
 
     fn send_pack_data(&self) {
+        println!("Send: [PACKFILE]");
+        // Note: this part of the code adds every commits into
+        // the packfile until a commit announced by the client
+        // is found AND a common parent is found (or until the
+        // initial commit).
         let mut pb = self.repository.packbuilder().unwrap();
         let fetched = Oid::from_str(&*self.wanted).unwrap();
         let mut revwalk = self.repository.revwalk().unwrap();
-        revwalk.push(fetched);
-        revwalk.set_sorting(Sort::TOPOLOGICAL);
+        let _ = revwalk.push(fetched);
+        let _ = revwalk.set_sorting(Sort::TOPOLOGICAL);
 
         let mut parents : Vec<String> = Vec::new();
         let mut have = false;
@@ -174,18 +193,18 @@ impl Server {
                 // All commits are fetched
                 break;
             }
-            pb.insert_commit(oid);
+            let _ = pb.insert_commit(oid);
             let commit = self.repository.find_commit(oid).unwrap();
             let mut commit_parents = commit.parents();
-            // Make sure to explore the whole graph
+            // Make sure to explore every branches.
             while let Some(p) = commit_parents.next() {
                 parents.push(p.id().to_string());
             }
         }
 
+        // Note: the buf can be huge. Packbuilder has some methods to get chunks.
         let mut data = Buf::new();
-        pb.write_buf(&mut data);
-        println!("{:?}", data.len());
+        let _ = pb.write_buf(&mut data);
 
         let len = data.len();
         let data : Vec<u8> = data.to_vec();
@@ -203,6 +222,7 @@ impl Server {
             sent += pkt_size;
         }
 
+        println!("Send: {}", FLUSH_PKT);
         // And finish by a little FLUSH
         self.channel.lock().unwrap().send(FLUSH_PKT.as_bytes().to_vec()).unwrap();
     }
