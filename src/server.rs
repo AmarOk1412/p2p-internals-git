@@ -213,7 +213,7 @@ impl Server {
             // cf https://github.com/git/git/blob/master/Documentation/technical/pack-protocol.txt#L166
             // In 'side-band-64k' mode it will send up to 65519 data bytes plus 1 control code, for a
             // total of up to 65520 bytes in a pkt-line.
-            let pkt_size = min(65519, len - sent);
+            let pkt_size = min(65515, len - sent);
             // The packet is Size (4 bytes), Control byte (0x01 for data), pack data.
             let pkt = format!("{:04x}", pkt_size + 5 /* size + control */);
             self.channel.lock().unwrap().send(pkt.as_bytes().to_vec()).unwrap();
