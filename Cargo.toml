@@ -6,4 +6,4 @@ edition = "2018"
 
 [dependencies]
 bichannel = "0.0.4"
-git2 = { git = "https://github.com/AmarOk1412/git2-rs" }
+git2 = { git = "https://github.com/AmarOk1412/git2-rs" } # Necessary until 0.13.18

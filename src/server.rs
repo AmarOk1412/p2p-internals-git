@@ -124,6 +124,8 @@ impl Server {
                 // NOTE: Do not do multi-ack, just send ACK + pack file In case of no common base ACK
                 self.ack_common();
                 self.nak();
+            } else if self.wanted.is_empty() {
+                self.stop = true;
             }
         } else {
             println!("Unwanted packet received: {}", pkt);
@@ -133,7 +135,7 @@ impl Server {
 
     fn send_references_capabilities(&self) {
         let current_head = self.repository.refname_to_id("HEAD").unwrap();
-        let mut capabilities = format!("{} HEAD\0side-band side-band-64k shallow no-progress include-tag", current_head);
+        let mut capabilities = format!("{} HEAD\0side-band side-band-64k shallow no-progress include-tag multi_ack", current_head);
         capabilities = format!("{:04x}{}\n", capabilities.len() + 5 /* size + \n */, capabilities);
 
         for name in self.repository.references().unwrap().names() {

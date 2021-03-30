@@ -20,6 +20,7 @@ fn main() {
     let src_dir = args[1].clone();
     let dest_dir = Path::new(&args[2]);
 
+    // For fetch, comment the 4 following lines
     if dest_dir.is_dir() {
         println!("Can't clone into an existing directory");
         return;
@@ -46,9 +47,16 @@ fn main() {
         server.run();
     });
 
+    // For fetch
+    // let repository = git2::Repository::open(dest_dir).unwrap();
+    // let mut remote = repository.remote_anonymous("wolf://localhost/zds").unwrap();
+    // let mut fo = git2::FetchOptions::new();
+    // remote.fetch(&[] as &[&str], Some(&mut fo), None).unwrap();
+
+    // For clone
+    RepoBuilder::new().clone("wolf://localhost/zds", dest_dir).unwrap();
     // Note: "wolf://" triggers our registered transport. localhost/zds is unused
     // as our server only serves one repository and the address is not resolved.
-    RepoBuilder::new().clone("wolf://localhost/zds", dest_dir).unwrap();
     println!("Cloned into {:?}!", dest_dir);
 
     server.join().expect("The server panicked");
